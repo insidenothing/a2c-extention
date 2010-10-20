@@ -1,0 +1,121 @@
+<html>
+  <script type="text/javascript" src="chrome_ex_oauthsimple.js"></script>
+  <script type="text/javascript" src="chrome_ex_oauth.js"></script>
+  <script>
+    var host = "android2cloud-insidenothing.appspot.com"
+    var oauth = ChromeExOAuth.initBackgroundPage({
+      'request_url': "https://" + host + "/_ah/OAuthGetRequestToken",
+      'authorize_url': "https://" + host + "/_ah/OAuthAuthorizeToken",
+      'access_url': "https://" + host + "/_ah/OAuthGetAccessToken",
+      'consumer_key': "anonymous",
+      'consumer_secret': "anonymous",
+      'scope': ""
+    });
+    // open a link in a new tab. Pass a link as a string.
+    function openLink(link) {
+      chrome.tabs.create({'url': link}, function(tab) { });
+    }
+    
+    // retrieve the latest passed link from the server
+    var getLinkReturn;
+    var xhr;
+    function getLink() {
+      oauth.sendSignedRequest("http://" + host + "/links/get", returnLink, null);
+    }
+    
+    function returnLink(resp, xhr) {
+      var link_regex = new RegExp("<link>([^<]*)(?=<\/link>)");
+      var source_regex = new RegExp("<source>([^<]*)(?=<\/source>)");
+      var age_regex = new RegExp("<age>([^<]*)(?=<\/age>)");
+      var error_regex = new RegExp("<error>([^<]*)(?=<\/error>)");
+      if(resp.match(link_regex)){
+        var link_matches = link_regex.exec(resp);
+        var link = link_matches[1];
+	if(link.indexOf("://") == -1){
+		link = "http://"+link;
+	}
+	if(resp.match(source_regex)){
+                var source_matches = source_regex.exec(resp);
+		var link_source = source_matches[1];
+                //notify(link_source);
+	}
+        if(resp.match(age_regex)){
+		var age_matches = age_regex.exec(resp);
+		var age = age_matches[1];
+		//notify("Link is "+age+" days old.");
+	}
+        compareAndOpen(link);
+      }else if(resp.match(error_regex)){
+        var error_matches = error_regex.exec(resp);
+        var error = error_matches[1];
+        notify(error + " The extension will now attempt to re-authenticate you.");
+        reauth();
+      }
+    }
+
+    function forceGetLink() {
+      oauth.sendSignedRequest("http://" + host + "/links/get", forceReturnLink, null);
+    }
+    
+    function forceReturnLink(resp, xhr) {
+      var regex = new RegExp("<link>([^<]*)(?=<\/link>)");
+      if(resp.match(regex)){
+        matches = regex.exec(resp);
+        var link = matches[1];
+	if(link.indexOf("://") == -1){
+		link = "http://"+link;
+	}
+        localStorage['last_link'] = link;
+        openLink(link);
+      }else{
+        if(localStorage['last_link'] != ""){
+          openLink(localStorage['last_link']);
+        }
+      }
+    }
+    
+    // determine if this link has been opened
+    function compareLinks(link) {
+      if (localStorage['last_link'] != link){
+        localStorage['last_link'] = link;
+        return true;
+      }else{
+        //alert("Checked, and link \""+localStorage['last_link']+"\" is old.")
+        return false;
+      }
+    }
+    
+    // combine compare and open functions for the timeout call.
+    function compareAndOpen(link) {
+      if (compareLinks(link)) {
+        openLink(link);
+      }
+    }
+    
+    oauth.authorize(getLink);
+    
+    // check if there's a new link
+    timeout = setInterval("getLink()", 15000);
+
+    // Open the last link, no matter what, when the icon is clicked
+    chrome.browserAction.onClicked.addListener(function(tab) {
+        forceGetLink();
+        //reauth();
+    });
+
+    function notify(message) {
+        if (window.webkitNotifications.checkPermission() == 0) {
+            // note the show()
+            window.webkitNotifications.createNotification('', 'android2cloud-insidenothing error', message).show(); 
+            localStorage["oauth_notify"] = true;
+        } else {
+            alert(message);
+        }
+    }
+
+    function reauth() {
+        oauth.clearTokens();
+        oauth.authorize(getLink);
+    }
+  </script>
+</html>
